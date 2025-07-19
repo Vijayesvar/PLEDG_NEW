@@ -1,0 +1,225 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ENUMs
+enum KycStatus {
+  pending
+  verified
+  rejected
+}
+
+enum CollateralType {
+  eth
+  btc
+}
+
+enum CollateralStatus {
+  pending
+  locked
+  released
+  liquidated
+}
+
+enum LoanStatus {
+  pending
+  draft
+  active
+  funding_pending
+  funded
+  repaying
+  completed
+  liquidated
+  disputed
+  cancelled
+}
+
+enum InstallmentStatus {
+  pending
+  paid
+  grace_period
+  overdue
+  defaulted
+}
+
+enum TransactionType {
+  collateral_lock
+  funding
+  repayment
+  liquidation
+  collateral_release
+  fee
+  refund
+}
+
+enum CurrencyType {
+  inr
+  eth
+}
+
+// Models
+model User {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String   @unique @db.VarChar(255)
+  passwordHash      String   @db.VarChar(255) @map("password_hash")
+  firstName     String?  @map("first_name") @db.VarChar(100)
+  lastName      String?  @map("last_name") @db.VarChar(100)
+  phoneNumber   String?  @map("phone_number") @db.VarChar(15)
+  dateOfBirth   DateTime? @map("date_of_birth") @db.Date
+  emailRegistered Boolean @default(false) @map("email_registered")
+  verificationToken String? @map("verification_token") @db.VarChar(255)
+  verificationTokenExpiresAt DateTime? @map("verification_token_expires_at")
+  kycBasicStatus KycStatus @default(pending) @map("kyc_basic_status")
+  kycBankStatus KycStatus @default(pending) @map("kyc_bank_status")
+  kycAadharStatus KycStatus @default(pending) @map("kyc_aadhar_status")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  userWallets       UserWallet[]
+  userBankAccounts  UserBankAccount[]
+  collaterals       Collateral[]
+  borrowerLoans     Loan[] @relation("BorrowerLoans")
+  lenderLoans       Loan[] @relation("LenderLoans")
+  transactions      Transaction[]
+  aadhaarOtpSessions AadhaarOtpSession[]
+
+  @@map("users")
+}
+
+model UserWallet {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  address   String   @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_wallets")
+}
+
+model UserBankAccount {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  secureToken String   @map("secure_token") @db.VarChar(255)
+  verified    Boolean  @default(false) @map("verified")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_bank_accounts")
+}
+
+model Collateral {
+  id                    String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String           @map("user_id") @db.Uuid
+  type                  CollateralType
+  amount                Decimal          @db.Decimal(18, 8)
+  remainingAmount       Decimal          @map("remaining_amount") @db.Decimal(18, 8)
+  lockedTxHash          String?           @map("locked_tx_hash") @db.VarChar(66)
+  status                CollateralStatus @default(pending)
+  createdAt             DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loans Loan[]
+
+  @@map("collaterals")
+}
+
+model Loan {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  borrowerId      String     @map("borrower_id") @db.Uuid
+  lenderId        String?    @map("lender_id") @db.Uuid
+  collateralId    String     @map("collateral_id") @db.Uuid
+  amountInr       Decimal    @map("amount_inr") @db.Decimal(18, 2)
+  interestRate    Decimal    @map("interest_rate") @db.Decimal(5, 2)
+  durationMonths  Int        @map("duration_months")
+  monthlyPayment  Decimal    @map("monthly_payment") @db.Decimal(18, 2)
+  ltv             Decimal    @db.Decimal(5, 2)
+  status          LoanStatus @default(draft)
+  fundedAt        DateTime?  @map("funded_at")
+  fundingOrderId  String?    @map("funding_order_id")
+  fundingTxHash   String?    @map("funding_tx_hash") @db.VarChar(66)
+  createdAt       DateTime   @default(now()) @map("created_at")
+  disbursedAt     DateTime?  @map("disbursed_at")
+  completedAt     DateTime?  @map("completed_at")
+
+  // Relations
+  borrower     User          @relation("BorrowerLoans", fields: [borrowerId], references: [id], onDelete: Cascade)
+  lender       User?         @relation("LenderLoans", fields: [lenderId], references: [id], onDelete: SetNull)
+  collateral   Collateral    @relation(fields: [collateralId], references: [id], onDelete: Restrict)
+  installments Installment[]
+  transactions Transaction[]
+
+  @@map("loans")
+}
+
+model Installment {
+  id        String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loanId    String             @map("loan_id") @db.Uuid
+  dueDate   DateTime           @map("due_date") @db.Date
+  amount    Decimal            @db.Decimal(18, 2)
+  status    InstallmentStatus  @default(pending)
+  paidAt    DateTime?          @map("paid_at")
+  orderId   String?            @map("order_id")
+  createdAt DateTime           @default(now()) @map("created_at")
+
+  // Relations
+  loan         Loan          @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@map("installments")
+}
+
+model Transaction {
+  id                        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loanId                    String?         @map("loan_id") @db.Uuid
+  installmentId             String?         @map("installment_id") @db.Uuid
+  userId                    String?         @map("user_id") @db.Uuid
+  type                      TransactionType
+  amount                    Decimal         @db.Decimal(18, 8)
+  currency                  CurrencyType
+  fiatReference             String?         @map("fiat_reference") @db.VarChar(66)
+  blockchainTxHash          String?         @map("blockchain_tx_hash") @db.VarChar(66)
+  liquidatedCollateralAmount Decimal?       @map("liquidated_collateral_amount") @db.Decimal(18, 8)
+  status                    String          @db.VarChar(20)
+  createdAt                 DateTime        @default(now()) @map("created_at")
+  confirmedAt               DateTime?       @map("confirmed_at")
+
+  // Relations
+  loan        Loan?        @relation(fields: [loanId], references: [id], onDelete: SetNull)
+  installment Installment? @relation(fields: [installmentId], references: [id], onDelete: SetNull)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("transactions")
+}
+
+model AadhaarOtpSession {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  aadhaarNumber String   @map("aadhaar_number") @db.VarChar(12)
+  referenceId   String   @map("reference_id") @db.VarChar(50)
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("aadhaar_otp_sessions")
+  @@index([userId])
+  @@index([aadhaarNumber])
+  @@index([expiresAt])
+}

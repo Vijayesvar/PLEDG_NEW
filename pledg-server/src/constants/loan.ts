@@ -1,0 +1,10 @@
+export const LTV_THRESHOLD = 60;
+export const MIN_LOAN_DURATION = 1;
+export const MAX_LOAN_DURATION = 6;
+export const MIN_LOAN_AMOUNT = 100;
+export const MAX_LOAN_AMOUNT = 1000;
+export const MIN_INTEREST_RATE = 5;
+export const MAX_INTEREST_RATE = 25;
+export const MIN_COLLATERAL_AMOUNT = 100;
+export const MAX_COLLATERAL_AMOUNT = 1000;
+export const SUPPORTED_COLLATERALS = ['eth', 'btc'];
